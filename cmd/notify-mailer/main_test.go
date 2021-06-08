@@ -65,7 +65,7 @@ func TestReadRecipientsListMismatchedColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(badFileName)
-	recipients, err := readRecipientsList(badFileName)
+	recipients, err := makeRecipientList(badFileName, "")
 	if err == nil {
 		t.Fatalf("reading bad CSV file should have errored, but got %v",
 			recipients)
@@ -86,7 +86,7 @@ func TestSleepInterval(t *testing.T) {
 		sleepInterval: sleepLen * time.Second,
 		targetRange:   interval{start: "", end: "\xFF"},
 		clk:           newFakeClock(t),
-		destinations:  recipients,
+		recipients:    recipients,
 		dbMap:         dbMap,
 	}
 
@@ -107,7 +107,7 @@ func TestSleepInterval(t *testing.T) {
 		sleepInterval: 0,
 		targetRange:   interval{end: "\xFF"},
 		clk:           newFakeClock(t),
-		destinations:  recipients,
+		recipients:    recipients,
 		dbMap:         dbMap,
 	}
 
@@ -135,7 +135,7 @@ func TestMailIntervals(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       testSubject,
-		destinations:  recipients,
+		recipients:    recipients,
 		emailTemplate: tmpl,
 		targetRange:   interval{start: "\xFF", end: "\xFF\xFF"},
 		sleepInterval: 0,
@@ -154,7 +154,7 @@ func TestMailIntervals(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       testSubject,
-		destinations:  recipients,
+		recipients:    recipients,
 		emailTemplate: tmpl,
 		targetRange:   interval{},
 		sleepInterval: -10,
@@ -174,7 +174,7 @@ func TestMailIntervals(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       testSubject,
-		destinations:  []recipient{{id: 1}, {id: 2}, {id: 3}, {id: 4}},
+		recipients:    []recipient{{id: 1}, {id: 2}, {id: 3}, {id: 4}},
 		emailTemplate: tmpl,
 		targetRange:   interval{start: "test-example-updated@letsencrypt.org", end: "\xFF"},
 		sleepInterval: 0,
@@ -206,7 +206,7 @@ func TestMailIntervals(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       testSubject,
-		destinations:  []recipient{{id: 1}, {id: 2}, {id: 3}, {id: 4}},
+		recipients:    []recipient{{id: 1}, {id: 2}, {id: 3}, {id: 4}},
 		emailTemplate: tmpl,
 		targetRange:   interval{end: "test-example-updated@letsencrypt.org"},
 		sleepInterval: 0,
@@ -243,7 +243,7 @@ func TestMessageContentStatic(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       testSubject,
-		destinations:  []recipient{{id: 1}},
+		recipients:    []recipient{{id: 1}},
 		emailTemplate: template.Must(template.New("letter").Parse("an email body")),
 		targetRange:   interval{end: "\xFF"},
 		sleepInterval: 0,
@@ -275,11 +275,11 @@ func TestMessageContentInterpolated(t *testing.T) {
 	dbMap := mockEmailResolver{}
 	mc := &mocks.Mailer{}
 	m := &mailer{
-		log:          blog.UseMock(),
-		mailer:       mc,
-		dbMap:        dbMap,
-		subject:      "Test Subject",
-		destinations: recipients,
+		log:        blog.UseMock(),
+		mailer:     mc,
+		dbMap:      dbMap,
+		subject:    "Test Subject",
+		recipients: recipients,
 		emailTemplate: template.Must(template.New("letter").Parse(
 			`issued by {{range .}}{{ .Extra.validationMethod }}{{end}}`)),
 		targetRange:   interval{end: "\xFF"},
@@ -331,11 +331,11 @@ func TestMessageContentInterpolatedMultiple(t *testing.T) {
 	dbMap := mockEmailResolver{}
 	mc := &mocks.Mailer{}
 	m := &mailer{
-		log:          blog.UseMock(),
-		mailer:       mc,
-		dbMap:        dbMap,
-		subject:      "Test Subject",
-		destinations: recipients,
+		log:        blog.UseMock(),
+		mailer:     mc,
+		dbMap:      dbMap,
+		subject:    "Test Subject",
+		recipients: recipients,
 		emailTemplate: template.Must(template.New("letter").Parse(
 			`issued for:
 {{range .}}{{ .Extra.domain }}
@@ -371,7 +371,7 @@ type mockEmailResolver struct{}
 // into a list of anonymous structs
 func (bs mockEmailResolver) SelectOne(output interface{}, _ string, args ...interface{}) error {
 	// The "dbList" is just a list of contact records in memory
-	dbList := []contactJSON{
+	dbList := []queryResult{
 		{
 			ID:      1,
 			Contact: []byte(`["mailto:example@letsencrypt.org"]`),
@@ -430,14 +430,14 @@ func (bs mockEmailResolver) SelectOne(output interface{}, _ string, args ...inte
 		return fmt.Errorf("incorrect args type %T", args)
 	}
 	idRaw := argsMap["id"]
-	id, ok := idRaw.(int)
+	id, ok := idRaw.(int64)
 	if !ok {
 		return fmt.Errorf("incorrect args ID type %T", id)
 	}
 
 	// Play the type cast game to get a pointer to the output `contactJSON`
 	// pointer so we can write the result from the db list
-	outputPtr, ok := output.(*contactJSON)
+	outputPtr, ok := output.(*queryResult)
 	if !ok {
 		return fmt.Errorf("incorrect output type %T", output)
 	}
@@ -455,6 +455,11 @@ func (bs mockEmailResolver) SelectOne(output interface{}, _ string, args ...inte
 		}
 	}
 	return nil
+}
+
+func (bs mockEmailResolver) Exec(query string, args ...interface{}) (sql.Result, error) {
+	var result sql.Result
+	return result, nil
 }
 
 func TestResolveEmails(t *testing.T) {
@@ -508,7 +513,7 @@ func TestResolveEmails(t *testing.T) {
 		mailer:        mc,
 		dbMap:         dbMap,
 		subject:       "Test",
-		destinations:  recipients,
+		recipients:    recipients,
 		emailTemplate: tmpl,
 		targetRange:   interval{end: "\xFF"},
 		sleepInterval: 0,
